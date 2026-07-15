@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AccuLLM — Knowledge Graph powered Teacher-Student LLM pipeline with FAISS retrieval and real Transformer inference.">
+    <title>AccuLLM — Knowledge Graph LLM Pipeline</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+<div class="bg-orb bg-orb-1"></div>
+<div class="bg-orb bg-orb-2"></div>
+<div class="bg-orb bg-orb-3"></div>
+<div class="loading-bar" id="loadingBar"></div>
+
+<div class="app-container">
+
+    <!-- ═══════════════ HEADER ═══════════════ -->
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">A</div>
+            <div>
+                <div class="logo-text">AccuLLM</div>
+                <div class="logo-subtitle">Knowledge Graph • Transformer Pipeline</div>
+            </div>
+        </div>
+        <div class="header-stats" id="headerStats">
+            <div class="header-stat">
+                <div class="header-stat-value" id="statEntries">—</div>
+                <div class="header-stat-label">VectorDB Entries</div>
+            </div>
+            <div class="header-stat">
+                <div class="header-stat-value" id="statQueries">—</div>
+                <div class="header-stat-label">Past Queries</div>
+            </div>
+            <div class="header-stat">
+                <div class="header-stat-value" id="statVocab">—</div>
+                <div class="header-stat-label">Vocab Tokens</div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ═══════════════ SEARCH ═══════════════ -->
+    <section class="search-section">
+        <div class="search-container">
+            <div class="search-wrapper">
+                <span class="search-icon">🔍</span>
+                <input type="text" class="search-input" id="searchInput"
+                       placeholder="Ask anything — e.g. 'Tell me about the history of AI' or 'Who founded Tesla?'"
+                       autocomplete="off">
+                <button class="search-btn" id="searchBtn" onclick="runPipeline()">
+                    <span id="searchBtnText">Run Pipeline</span>
+                    <div class="spinner" id="searchSpinner" style="display:none"></div>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════ MAIN ═══════════════ -->
+    <div class="main-grid">
+
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+
+            <!-- Pipeline Steps -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-header-icon">⚡</span>
+                    <span class="card-title">Pipeline Steps</span>
+                </div>
+                <div class="card-body">
+                    <div class="pipeline-steps" id="pipelineSteps">
+                        <div class="pipeline-step" data-step="0">
+                            <div class="step-indicator"></div>
+                            <span class="step-name">VectorDB Search</span>
+                        </div>
+                        <div class="pipeline-step" data-step="1">
+                            <div class="step-indicator"></div>
+                            <span class="step-name">Information Retrieval</span>
+                        </div>
+                        <div class="pipeline-step" data-step="2">
+                            <div class="step-indicator"></div>
+                            <span class="step-name">Entity Extraction</span>
+                        </div>
+                        <div class="pipeline-step" data-step="3">
+                            <div class="step-indicator"></div>
+                            <span class="step-name">KG Construction</span>
+                        </div>
+                        <div class="pipeline-step" data-step="4">
+                            <div class="step-indicator"></div>
+                            <span class="step-name">FAISS Indexing</span>
+                        </div>
+                        <div class="pipeline-step" data-step="5">
+                            <div class="step-indicator"></div>
+                            <span class="step-name">Context Retrieval</span>
+                        </div>
+                        <div class="pipeline-step" data-step="6">
+                            <div class="step-indicator"></div>
+                            <span class="step-name">Teacher LLM</span>
+                        </div>
+                        <div class="pipeline-step" data-step="7">
+                            <div class="step-indicator"></div>
+                            <span class="step-name">Student Transformer</span>
+                        </div>
+                        <div class="pipeline-step" data-step="8">
+                            <div class="step-indicator"></div>
+                            <span class="step-name">Evaluation</span>
+                        </div>
+                        <div class="pipeline-step" data-step="9">
+                            <div class="step-indicator"></div>
+                            <span class="step-name">Store in VectorDB</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VectorDB Stats -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-header-icon">📊</span>
+                    <span class="card-title">VectorDB Stats</span>
+                </div>
+                <div class="card-body">
+                    <div class="stats-grid" id="statsGrid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="dbTotal">0</div>
+                            <div class="stat-label">Total Entries</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="dbIndex">0</div>
+                            <div class="stat-label">FAISS Index</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="dbVocab">0</div>
+                            <div class="stat-label">Vocabulary</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="dbDim">128</div>
+                            <div class="stat-label">Embed Dim</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-header-icon">📋</span>
+                    <span class="card-title">Query History</span>
+                </div>
+                <div class="card-body">
+                    <div class="history-list" id="historyList">
+                        <div class="history-empty">No queries yet. Run the pipeline!</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CONTENT -->
+        <main class="content-area">
+
+            <!-- Welcome State -->
+            <div class="card" id="welcomeCard">
+                <div class="card-body">
+                    <div class="welcome-state">
+                        <span class="welcome-icon">🧠</span>
+                        <h1 class="welcome-title">Welcome to AccuLLM</h1>
+                        <p class="welcome-desc">
+                            Enter a query above to explore the full Teacher-Student LLM pipeline — 
+                            from knowledge extraction to transformer inference, powered by FAISS vector search.
+                        </p>
+                        <div class="feature-pills">
+                            <div class="feature-pill">
+                                <span class="feature-pill-icon">📝</span> Tokenization
+                            </div>
+                            <div class="feature-pill">
+                                <span class="feature-pill-icon">🔢</span> Embeddings
+                            </div>
+                            <div class="feature-pill">
+                                <span class="feature-pill-icon">🎯</span> Self-Attention
+                            </div>
+                            <div class="feature-pill">
+                                <span class="feature-pill-icon">🗂️</span> Knowledge Graph
+                            </div>
+                            <div class="feature-pill">
+                                <span class="feature-pill-icon">⚡</span> FAISS Search
+                            </div>
+                            <div class="feature-pill">
+                                <span class="feature-pill-icon">🗃️</span> VectorDB
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Container -->
+            <div class="results-container" id="resultsContainer">
+
+                <!-- Tab Bar -->
+                <div class="tab-bar">
+                    <button class="tab-btn active" onclick="switchTab('results')">Results</button>
+                    <button class="tab-btn" onclick="switchTab('graph')">Knowledge Graph</button>
+                    <button class="tab-btn" onclick="switchTab('chat')">Chat</button>
+                </div>
+
+                <!-- Results Tab -->
+                <div class="tab-content active" id="tab-results">
+
+                    <!-- Similar Past Queries -->
+                    <div class="card" id="similarCard" style="display:none">
+                        <div class="card-header">
+                            <span class="card-header-icon">🔗</span>
+                            <span class="card-title">Similar Past Queries (FAISS)</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="similar-list" id="similarList"></div>
+                        </div>
+                    </div>
+
+                    <!-- Answers -->
+                    <div class="answers-grid">
+                        <div class="answer-card teacher">
+                            <div class="answer-card-header">
+                                <span class="answer-badge">Groq</span>
+                                <span class="answer-label">Teacher LLM</span>
+                            </div>
+                            <div class="answer-content" id="teacherAnswer">Waiting for pipeline...</div>
+                        </div>
+                        <div class="answer-card student">
+                            <div class="answer-card-header">
+                                <span class="answer-badge">Transformer</span>
+                                <span class="answer-label">Student LLM</span>
+                            </div>
+                            <div class="answer-content" id="studentAnswer">Waiting for pipeline...</div>
+                        </div>
+                    </div>
+
+                    <!-- Model Info -->
+                    <div class="card" id="modelCard" style="display:none">
+                        <div class="card-header">
+                            <span class="card-header-icon">🏗️</span>
+                            <span class="card-title">Student Transformer Architecture</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="model-info-grid" id="modelInfo"></div>
+                        </div>
+                    </div>
+
+                    <!-- Metrics -->
+                    <div class="card" id="metricsCard" style="display:none">
+                        <div class="card-header">
+                            <span class="card-header-icon">📈</span>
+                            <span class="card-title">Evaluation Metrics</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="metrics-row" id="metricsRow"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Graph Tab -->
+                <div class="tab-content" id="tab-graph">
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-header-icon">🕸️</span>
+                            <span class="card-title">Knowledge Graph Visualization</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="graph-container" id="graphContainer"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Tab -->
+                <div class="tab-content" id="tab-chat">
+                    <div class="card chat-section visible">
+                        <div class="card-header">
+                            <span class="card-header-icon">💬</span>
+                            <span class="card-title">Interactive Chat with Student LLM</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="chat-messages" id="chatMessages"></div>
+                            <div class="chat-input-row">
+                                <input type="text" class="chat-input" id="chatInput"
+                                       placeholder="Ask a follow-up question..."
+                                       onkeydown="if(event.key==='Enter')sendChat()">
+                                <button class="chat-send-btn" id="chatSendBtn" onclick="sendChat()">Send</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

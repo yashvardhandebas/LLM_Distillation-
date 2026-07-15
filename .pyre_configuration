@@ -1,0 +1,11 @@
+{
+  "source_directories": [
+    "c:/Users/admin/Desktop/tsllm"
+  ],
+  "search_path": [
+    "c:/Users/admin/Desktop/tsllm/.venv/Lib/site-packages"
+  ],
+  "exclude": [
+    ".venv/.*"
+  ]
+}

@@ -1,0 +1,35 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Local Environment Configurations (contains API keys!)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE/Editor settings
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# AccuLLM Local Datasets and Database Caches
+vector_store/
+training_dataset.csv
+training_dataset.json
+dataset.json
+dataset.csv
+kg_output.png
+kg_output.graphml
+apple_kg.graphml

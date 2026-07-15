@@ -1,0 +1,13 @@
+groq
+networkx
+torch
+transformers
+pandas
+pydantic
+python-dotenv
+scikit-learn
+matplotlib
+scipy
+faiss-cpu
+flask
+flask-cors
