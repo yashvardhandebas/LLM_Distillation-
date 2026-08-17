@@ -165,15 +165,8 @@ def run_pipeline():
     result['teacher_answer'] = teacher_answer
     result['steps'][-1]['status'] = 'done'
 
-    result['steps'].append({'name': 'Student Transformer (Tokenize → Embed → Attend → Generate)', 'status': 'running'})
-    student = StudentLLMInference(
-        embed_dim=128, num_heads=4, num_layers=2,
-        ff_dim=256, max_seq_len=256, lr=1e-3, epochs=100
-    )
-    student.set_context(graph, teacher_answer)
-    student_response = student.generate(question)
-    result['student_answer'] = student_response
-    result['steps'][-1]['status'] = 'done'
+    result['steps'].append({'name': 'Student Transformer (Tokenize → Embed → Attend → Generate)', 'status': 'done'})
+    result['student_answer'] = "(Student LLM training is currently in progress for Milestone 2)"
 
     model_info = {}
     if student.model:
@@ -187,16 +180,11 @@ def run_pipeline():
         }
     result['model_info'] = model_info
 
-    result['steps'].append({'name': 'Evaluation', 'status': 'running'})
-    eval_framework = EvaluationFramework()
-    mock_gt = [{"source": entities[0]['name'] if entities else "X", "target": entities[1]['name'] if len(entities) > 1 else "Y", "type": relations[0]['type'] if relations else "related"}]
-    extractor_metrics = eval_framework.evaluate_extractor(relations, mock_gt)
-    student_metrics = eval_framework.evaluate_student([student_response], [teacher_answer])
+    result['steps'].append({'name': 'Evaluation (WIP)', 'status': 'done'})
     result['metrics'] = {
-        'extractor': extractor_metrics,
-        'student_similarity': round(student_metrics, 4)
+        'extractor': "WIP",
+        'student_similarity': "WIP"
     }
-    result['steps'][-1]['status'] = 'done'
 
     result['steps'].append({'name': 'Storing in VectorDB', 'status': 'running'})
     kg_facts_str = "; ".join([f"{u} → {d.get('type', '')} → {v}" for u, v, d in graph.edges(data=True)])

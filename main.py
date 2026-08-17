@@ -126,26 +126,9 @@ def main():
     dataset_gen.save_csv("training_dataset.csv")
     print("Dataset saved to training_dataset.json and training_dataset.csv")
     
-    print("\n[8] Initializing Student LLM with Real Transformer Architecture...")
-    print("="*60)
-    print("  Student LLM Pipeline: Tokenization → Embeddings → Self-Attention → Output")
-    print("="*60)
-    student = StudentLLMInference(
-        embed_dim=128,
-        num_heads=4,
-        num_layers=2,
-        ff_dim=256,
-        max_seq_len=256,
-        lr=1e-3,
-        epochs=30
-    )
-    student.set_context(graph, teacher_answer)
-    
-    print("\n[9] Running Student LLM Inference (full pipeline)...")
-    student_response = student.generate(question)
-    print("\n" + "-"*60)
-    print("Student Answer:", student_response)
-    print("-"*60)
+    print("\n[8] Initializing Student LLM with Real Transformer Architecture... (Work in Progress)")
+    student_response = "(Student LLM inference will be available in Milestone 2)"
+    print("\n[9] Running Student LLM Inference (full pipeline)... (Work in Progress)")
 
     print("\n[9.5] Storing query + answers in VectorDB...")
     kg_facts_str = ""
@@ -167,24 +150,9 @@ def main():
     print(f"    VectorDB now has {db_stats['total_entries']} total entries")
     print(f"    Entry types: {db_stats['entry_types']}")
     
-    print("\n[10] Computing Structured Supervision Loss...")
-    loss_module = StructuredSupervisionLoss(alpha=0.5)
-    vocab_size = student.tokenizer.vocab_size if student.tokenizer.vocab_size > 0 else 100
-    mock_logits = torch.randn(2, 5, vocab_size)
-    mock_labels = torch.randint(0, vocab_size, (2, 5))
-    mock_embeddings = torch.randn(1, 128)
-    mock_predictions = torch.randn(1, 128)
-    loss = loss_module(mock_logits, mock_labels, mock_embeddings, mock_predictions)
-    print(f"Computed total loss (LM + Structure): {loss.item():.4f}")
+    print("\n[10] Computing Structured Supervision Loss... (Work in Progress)")
     
-    print("\n[11] Running Evaluation Framework...")
-    eval_framework = EvaluationFramework()
-    mock_ground_truth = [{"source": "Apple Inc.", "target": "Steve Jobs", "type": "founded by"}]
-    extractor_metrics = eval_framework.evaluate_extractor(extraction_data.get('relations', []), mock_ground_truth)
-    print(f"Extractor Metrics (Precision/Recall/F1): {extractor_metrics}")
-    
-    student_metrics = eval_framework.evaluate_student([student_response], [teacher_answer])
-    print(f"Student Metrics (Jaccard Similarity w/ Teacher): {student_metrics:.4f}")
+    print("\n[11] Running Evaluation Framework... (Work in Progress)")
     
     print("\n[12] Pipeline Complete.")
     print("    In a real scenario, metrics from [11] are used to update Student or refine Teacher Prompts.")
@@ -230,7 +198,7 @@ def main():
         else:
             print("    No similar past queries found.")
         
-        student_answer = student.generate(user_q)
+        student_answer = "(Interactive Student LLM chat is WIP)"
         print(f"\nStudent LLM: {student_answer}")
 
         vector_db.add_entry(
