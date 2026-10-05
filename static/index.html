@@ -201,62 +201,66 @@
 
                 <!-- Tab Bar -->
                 <div class="tab-bar">
-                    <button class="tab-btn active" onclick="switchTab('results')">Results</button>
-                    <button class="tab-btn" onclick="switchTab('graph')">Knowledge Graph</button>
-                    <button class="tab-btn" onclick="switchTab('chat')">Chat</button>
+                    <button class="tab-btn active" onclick="switchTab('results', event)">Results & Distillation</button>
+                    <button class="tab-btn" onclick="switchTab('graph', event)">Knowledge Graph</button>
+                    <button class="tab-btn" onclick="switchTab('attention', event)">Architecture & Attention</button>
+                    <button class="tab-btn" onclick="switchTab('chat', event)">Chat with Student</button>
                 </div>
 
                 <!-- Results Tab -->
                 <div class="tab-content active" id="tab-results">
-
-                    <!-- Similar Past Queries -->
-                    <div class="card" id="similarCard" style="display:none">
-                        <div class="card-header">
-                            <span class="card-header-icon">🔗</span>
-                            <span class="card-title">Similar Past Queries (FAISS)</span>
-                        </div>
-                        <div class="card-body">
-                            <div class="similar-list" id="similarList"></div>
-                        </div>
-                    </div>
 
                     <!-- Answers -->
                     <div class="answers-grid">
                         <div class="answer-card teacher">
                             <div class="answer-card-header">
                                 <span class="answer-badge">Groq</span>
-                                <span class="answer-label">Teacher LLM</span>
+                                <span class="answer-label">Teacher LLM (Knowledge Source)</span>
                             </div>
                             <div class="answer-content" id="teacherAnswer">Waiting for pipeline...</div>
                         </div>
                         <div class="answer-card student">
                             <div class="answer-card-header">
                                 <span class="answer-badge">Transformer</span>
-                                <span class="answer-label">Student LLM</span>
+                                <span class="answer-label">Student LLM (Distilled & KG Grounded)</span>
                             </div>
                             <div class="answer-content" id="studentAnswer">Waiting for pipeline...</div>
                         </div>
                     </div>
 
-                    <!-- Model Info -->
-                    <div class="card" id="modelCard" style="display:none">
-                        <div class="card-header">
-                            <span class="card-header-icon">🏗️</span>
-                            <span class="card-title">Student Transformer Architecture</span>
-                        </div>
-                        <div class="card-body">
-                            <div class="model-info-grid" id="modelInfo"></div>
-                        </div>
-                    </div>
-
-                    <!-- Metrics -->
+                    <!-- Evaluation Metrics -->
                     <div class="card" id="metricsCard" style="display:none">
                         <div class="card-header">
                             <span class="card-header-icon">📈</span>
-                            <span class="card-title">Evaluation Metrics</span>
+                            <span class="card-title">Distillation & KG Evaluation Metrics</span>
+                            <span class="overall-badge" id="overallBadge">Score: —</span>
                         </div>
                         <div class="card-body">
-                            <div class="metrics-row" id="metricsRow"></div>
+                            <div class="metrics-grid">
+                                <div class="metric-box">
+                                    <div class="metric-box-title">Knowledge Graph Extractor</div>
+                                    <div class="metric-box-content" id="extractorMetrics"></div>
+                                </div>
+                                <div class="metric-box">
+                                    <div class="metric-box-title">Student Distillation Quality</div>
+                                    <div class="metric-box-content" id="distillationMetrics"></div>
+                                </div>
+                                <div class="metric-box">
+                                    <div class="metric-box-title">Model Compression & Efficiency</div>
+                                    <div class="metric-box-content" id="compressionMetrics"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Similar Past Queries -->
+                    <div class="card" id="similarCard" style="display:none">
+                        <div class="card-header">
+                            <span class="card-header-icon">🔗</span>
+                            <span class="card-title">Similar Past Queries (FAISS Semantic Retrieval)</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="similar-list" id="similarList"></div>
                         </div>
                     </div>
                 </div>
@@ -267,9 +271,53 @@
                         <div class="card-header">
                             <span class="card-header-icon">🕸️</span>
                             <span class="card-title">Knowledge Graph Visualization</span>
+                            <span class="graph-legend" id="graphLegend"></span>
                         </div>
                         <div class="card-body">
                             <div class="graph-container" id="graphContainer"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Attention & Architecture Tab -->
+                <div class="tab-content" id="tab-attention">
+                    <!-- Model Specs -->
+                    <div class="card" id="modelCard" style="display:none">
+                        <div class="card-header">
+                            <span class="card-header-icon">🏗️</span>
+                            <span class="card-title">Student Transformer Architecture Specs</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="model-info-grid" id="modelInfo"></div>
+                        </div>
+                    </div>
+
+                    <!-- Structured Supervision Loss -->
+                    <div class="card" id="lossCard" style="display:none">
+                        <div class="card-header">
+                            <span class="card-header-icon">⚖️</span>
+                            <span class="card-title">Structured Supervision Loss (LM + KG Graph Structure)</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="loss-breakdown-grid" id="lossBreakdown"></div>
+                            <div class="loss-history-container" id="lossHistory"></div>
+                        </div>
+                    </div>
+
+                    <!-- Interactive Self-Attention Matrix -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-header-icon">🎯</span>
+                            <span class="card-title">Causal Multi-Head Self-Attention Matrix</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="attention-input-row">
+                                <input type="text" class="chat-input" id="attnInput" placeholder="Inspect attention for phrase (e.g. 'Apple founded by Steve Jobs')...">
+                                <button class="chat-send-btn" onclick="inspectAttention()">Inspect Attention</button>
+                            </div>
+                            <div class="attention-heatmap-wrapper" id="attnHeatmap">
+                                <div class="attn-empty">Run the pipeline first to inspect Transformer attention patterns.</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -279,10 +327,12 @@
                     <div class="card chat-section visible">
                         <div class="card-header">
                             <span class="card-header-icon">💬</span>
-                            <span class="card-title">Interactive Chat with Student LLM</span>
+                            <span class="card-title">Interactive Chat with Student LLM (FAISS & KG Memory)</span>
                         </div>
                         <div class="card-body">
-                            <div class="chat-messages" id="chatMessages"></div>
+                            <div class="chat-messages" id="chatMessages">
+                                <div class="chat-msg assistant">Hello! I am your distilled Student LLM. Run the pipeline to ground me with knowledge graph context, or ask me any question!</div>
+                            </div>
                             <div class="chat-input-row">
                                 <input type="text" class="chat-input" id="chatInput"
                                        placeholder="Ask a follow-up question..."

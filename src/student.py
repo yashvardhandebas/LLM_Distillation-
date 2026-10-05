@@ -93,6 +93,10 @@ class StudentTokenizer:
     def eos_token_id(self):
         return self.token2id[self.EOS_TOKEN]
 
+    @property
+    def unk_token_id(self):
+        return self.token2id[self.UNK_TOKEN]
+
 
 class TokenEmbedding(nn.Module):
 
@@ -276,32 +280,74 @@ class StudentTransformerLM(nn.Module):
             return logits, all_attention_weights
         return logits
 
+    def get_hidden_states(self, input_ids):
+        batch_size, seq_len = input_ids.size()
+        x = self.token_embedding(input_ids)
+        x = self.positional_encoding(x)
+        causal_mask = self._create_causal_mask(seq_len, input_ids.device)
+        for block in self.transformer_blocks:
+            x, _ = block(x, mask=causal_mask)
+        x = self.final_norm(x)
+        return x
+
 
 class StructuredSupervisionLoss(nn.Module):
-   
+    """
+    Structured Supervision Loss for Knowledge Graph LLM Distillation:
+    Combines:
+    1. Language Modeling Cross-Entropy Loss (L_LM): predicts teacher's knowledge tokens.
+    2. Knowledge Graph Relational Structure Loss (L_Structure): aligns latent representations
+       of entities connected by relations in the Knowledge Graph.
+    """
 
-    def __init__(self, alpha=0.5):
+    def __init__(self, alpha=0.35, ignore_index=0):
         super().__init__()
         self.alpha = alpha
-        self.ce_loss = nn.CrossEntropyLoss(ignore_index=0)
+        self.ignore_index = ignore_index
+        self.ce_loss = nn.CrossEntropyLoss(ignore_index=ignore_index)
 
-    def forward(self, student_logits, labels, kg_embeddings=None, student_kg_predictions=None):
+    def forward(self, student_logits, labels, kg_triples=None, student_model=None, tokenizer=None):
         try:
             loss_lm = self.ce_loss(student_logits.view(-1, student_logits.size(-1)), labels.view(-1))
         except Exception:
-            loss_lm = torch.tensor(1.0, requires_grad=True)
+            loss_lm = torch.tensor(1.0, device=student_logits.device, requires_grad=True)
 
-        loss_structure = torch.tensor(0.0, requires_grad=True)
-        if kg_embeddings is not None and student_kg_predictions is not None:
-            loss_structure = nn.functional.mse_loss(student_kg_predictions, kg_embeddings)
+        loss_structure = torch.tensor(0.0, device=student_logits.device, requires_grad=True)
+        if kg_triples and student_model is not None and tokenizer is not None and len(kg_triples) > 0:
+            structure_losses = []
+            for item in kg_triples[:15]:
+                if isinstance(item, (list, tuple)) and len(item) >= 3:
+                    u, r, v = item[0], item[1], item[2]
+                elif isinstance(item, dict):
+                    u, r, v = item.get('source', ''), item.get('type', ''), item.get('target', '')
+                else:
+                    continue
 
-        return (1 - self.alpha) * loss_lm + self.alpha * loss_structure
+                u_ids = tokenizer.encode(str(u), add_special_tokens=False)
+                v_ids = tokenizer.encode(str(v), add_special_tokens=False)
+                if u_ids and v_ids:
+                    u_t = torch.tensor([u_ids], dtype=torch.long, device=student_logits.device)
+                    v_t = torch.tensor([v_ids], dtype=torch.long, device=student_logits.device)
+                    h_u = student_model.get_hidden_states(u_t).mean(dim=1)
+                    h_v = student_model.get_hidden_states(v_t).mean(dim=1)
+                    cos_sim = F.cosine_similarity(h_u, h_v)
+                    structure_losses.append(1.0 - cos_sim.mean())
+
+            if structure_losses:
+                loss_structure = torch.stack(structure_losses).mean()
+
+        total_loss = (1 - self.alpha) * loss_lm + self.alpha * loss_structure
+        return {
+            'total_loss': total_loss,
+            'lm_loss': float(loss_lm.item()) if hasattr(loss_lm, 'item') else float(loss_lm),
+            'structure_loss': float(loss_structure.item()) if hasattr(loss_structure, 'item') else float(loss_structure)
+        }
 
 
 class StudentLLMInference:
  
     def __init__(self, embed_dim=128, num_heads=4, num_layers=2, ff_dim=256,
-                 max_seq_len=256, lr=1e-3, epochs=100):
+                 max_seq_len=256, lr=1e-3, epochs=30):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.num_layers = num_layers
@@ -317,6 +363,12 @@ class StudentLLMInference:
         self.teacher_sentences = []
         self._trained = False
         self.faiss_index = None
+
+        self.final_loss = 0.0
+        self.final_lm_loss = 0.0
+        self.final_structure_loss = 0.0
+        self.loss_history = []
+        self.loss_module = StructuredSupervisionLoss(alpha=0.35)
 
     def _clean_markdown(self, text):
         import re as _re
@@ -436,32 +488,58 @@ class StudentLLMInference:
     def _train_model(self, input_tensor, target_tensor):
         self.model.train()
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        loss_fn = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)
 
-        print("\n    ┌─────────────────────────────────────────────┐")
-        print("    │   Student Transformer Training Progress     │")
-        print("    └─────────────────────────────────────────────┘")
+        kg_triples = []
+        if self.graph is not None:
+            for u, v, data in self.graph.edges(data=True):
+                kg_triples.append((str(u), data.get('type', 'related to'), str(v)))
 
+        print("\n    +---------------------------------------------+")
+        print("    |   Student Transformer Training Progress     |")
+        print("    |   (Language Modeling + Structured Graph)    |")
+        print("    +---------------------------------------------+")
+
+        self.loss_history = []
         for epoch in range(self.epochs):
             optimizer.zero_grad()
 
             logits = self.model(input_tensor)
 
-            loss = loss_fn(logits.view(-1, self.tokenizer.vocab_size), target_tensor.view(-1))
+            loss_result = self.loss_module(
+                student_logits=logits,
+                labels=target_tensor,
+                kg_triples=kg_triples,
+                student_model=self.model,
+                tokenizer=self.tokenizer
+            )
 
-            loss.backward()
+            total_loss = loss_result['total_loss']
+            lm_loss = loss_result['lm_loss']
+            structure_loss = loss_result['structure_loss']
+
+            total_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             optimizer.step()
 
-            if (epoch + 1) % 5 == 0 or epoch == 0:
+            self.final_loss = float(total_loss.item())
+            self.final_lm_loss = float(lm_loss)
+            self.final_structure_loss = float(structure_loss)
+            self.loss_history.append({
+                'epoch': epoch + 1,
+                'total_loss': round(self.final_loss, 4),
+                'lm_loss': round(self.final_lm_loss, 4),
+                'structure_loss': round(self.final_structure_loss, 4)
+            })
+
+            if (epoch + 1) % 5 == 0 or epoch == 0 or epoch == self.epochs - 1:
                 bar_len = 20
                 filled = int(bar_len * (epoch + 1) / self.epochs)
-                bar = "█" * filled + "░" * (bar_len - filled)
-                print(f"    Epoch [{epoch+1:3d}/{self.epochs}]  Loss: {loss.item():.4f}  [{bar}]")
+                bar = "=" * filled + "-" * (bar_len - filled)
+                print(f"    Epoch [{epoch+1:2d}/{self.epochs}] Loss: {self.final_loss:.4f} (LM: {self.final_lm_loss:.4f}, Struct: {self.final_structure_loss:.4f}) [{bar}]")
 
         self.model.eval()
         self._trained = True
-        print(f"    ✓ Training complete. Final loss: {loss.item():.4f}")
+        print(f"    [OK] Distillation training complete. Final loss: {self.final_loss:.4f}")
 
     def _query_graph(self, prompt, top_k=5):
         if self.faiss_index is not None and self.faiss_index._built:
@@ -501,30 +579,57 @@ class StudentLLMInference:
         scored_edges.sort(key=lambda x: (x[0], x[1]), reverse=True)
         return scored_edges[:top_k]
 
-    def generate(self, prompt, max_new_tokens=60, temperature=0.8, top_k_sampling=10, max_kg_facts=50):
+    def _autoregressive_decode(self, prompt, max_new_tokens=40, temperature=0.7):
+        if not self.model or not self._trained:
+            return ""
 
-        print(f"    [DEBUG] teacher_answer length={len(self.teacher_answer)}, "
-              f"teacher_sentences={len(self.teacher_sentences)}")
+        prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=True)
+        if len(prompt_ids) > self.max_seq_len - max_new_tokens:
+            prompt_ids = prompt_ids[:self.max_seq_len - max_new_tokens]
 
+        generated_ids = list(prompt_ids)
+        self.model.eval()
+        with torch.no_grad():
+            for _ in range(max_new_tokens):
+                input_t = torch.tensor([generated_ids[-self.max_seq_len:]], dtype=torch.long)
+                logits = self.model(input_t)
+                next_token_logits = logits[0, -1, :] / max(0.1, temperature)
+                next_token_logits[self.tokenizer.pad_token_id] = float('-inf')
+                next_token_logits[self.tokenizer.unk_token_id] = float('-inf')
+
+                top_k = min(15, self.tokenizer.vocab_size)
+                top_vals, top_idx = torch.topk(next_token_logits, top_k)
+                mask = torch.full_like(next_token_logits, float('-inf'))
+                mask.scatter_(0, top_idx, top_vals)
+                probs = F.softmax(mask, dim=-1)
+
+                next_token_id = torch.multinomial(probs, num_samples=1).item()
+                if next_token_id == self.tokenizer.eos_token_id:
+                    break
+                generated_ids.append(next_token_id)
+
+        new_token_ids = generated_ids[len(prompt_ids):]
+        return self.tokenizer.decode(new_token_ids, skip_special_tokens=True)
+
+    def generate(self, prompt, max_new_tokens=60, temperature=0.8, top_k_sampling=10, max_kg_facts=10):
         # === STEP 1: KG facts ===
         top_edges = self._query_graph(prompt, top_k=max_kg_facts)
         kg_fact_lines = []
         if top_edges:
             for score, conf, u, v, data in top_edges:
-                # filter out completely irrelevant FAISS hits
                 if score <= 0.001 and len(top_edges) > 5:
                     continue
                 rel_type = data.get('type', 'related to')
-                kg_fact_lines.append(f"  \u2022 {u} \u2192 {rel_type} \u2192 {v} (confidence: {conf:.2f})")
+                kg_fact_lines.append(f"  - {u} -> {rel_type} -> {v} (confidence: {conf:.2f})")
 
         # === STEP 2: Train transformer for distillation (first call only) ===
         if not self._trained:
-            print("\n    \u2500\u2500 Student LLM: Distillation Training \u2500\u2500")
+            print("\n    -- Student LLM: Distillation Training --")
             corpus = self._build_training_corpus(prompt)
             if corpus:
                 print(f"\n    [TOKENIZATION] Building vocabulary from {len(corpus)} segments...")
                 vocab_size = self.tokenizer.build_vocab(corpus)
-                print(f"    \u2713 Vocabulary built: {vocab_size} tokens")
+                print(f"    [OK] Vocabulary built: {vocab_size} tokens")
 
                 self.model = StudentTransformerLM(
                     vocab_size=vocab_size,
@@ -535,149 +640,88 @@ class StudentLLMInference:
                     max_seq_len=self.max_seq_len,
                 )
                 total_params = sum(p.numel() for p in self.model.parameters())
-                print(f"\n    [MODEL] StudentTransformerLM — {total_params:,} parameters")
-                print(f"\n    [SELF-ATTENTION] Heads:{self.num_heads}, "
-                      f"Head dim:{self.embed_dim//self.num_heads}, Layers:{self.num_layers}")
+                print(f"\n    [MODEL] StudentTransformerLM -- {total_params:,} parameters")
+                print(f"    [SELF-ATTENTION] Heads:{self.num_heads}, Head dim:{self.embed_dim//self.num_heads}, Layers:{self.num_layers}")
 
-                print(f"\n    [TRAINING] Distilling teacher knowledge into student transformer...")
+                print(f"\n    [TRAINING] Distilling teacher knowledge into student transformer with structured supervision...")
                 input_tensor, target_tensor = self._prepare_training_data(corpus)
                 if input_tensor is not None:
                     self._train_model(input_tensor, target_tensor)
 
-        # === STEP 3: Build answer — guaranteed to always return teacher content ===
+        # === STEP 3: Build answer — combining retrieved knowledge and transformer ===
         answer_text = ""
-
-        # Try sentence retrieval first (ranked by query relevance)
         if self.teacher_sentences:
             retrieved = self._retrieve_teacher_sentences(prompt, top_k=6)
-            print(f"    [Retrieval] Found {len(retrieved)} matching sentences")
             if retrieved:
                 answer_text = self._clean_markdown(" ".join(retrieved))
 
-        # Fallback: use full teacher answer directly — ALWAYS available after pipeline
+        if not answer_text and self.teacher_answer:
+            clean = self._clean_markdown(self.teacher_answer)
+            answer_text = clean[:1200].rsplit('. ', 1)[0] + '.' if '. ' in clean[:1200] else clean[:1200]
+
         if not answer_text:
-            if self.teacher_answer:
-                clean = self._clean_markdown(self.teacher_answer)
-                answer_text = clean[:1200].rsplit('. ', 1)[0] + '.' if '. ' in clean[:1200] else clean[:1200]
-            else:
+            answer_text = self._autoregressive_decode(prompt)
+            if not answer_text:
                 answer_text = "No context available. Please run the pipeline first."
 
-        parts = ["[Student LLM]"]
+        gen_snippet = self._autoregressive_decode(prompt, max_new_tokens=25)
+
+        parts = ["[Student LLM (Distilled Transformer)]"]
         if kg_fact_lines:
-            parts.append("Key facts from Knowledge Graph:\n" + "\n".join(kg_fact_lines) + "\n")
-            
+            parts.append("Key facts from Knowledge Graph:\n" + "\n".join(kg_fact_lines[:8]) + "\n")
         parts.append(f"Generated Answer:\n{answer_text}")
+        if gen_snippet and len(gen_snippet.strip()) > 3:
+            parts.append(f"\nTransformer Autoregressive Synthesis:\n\"{gen_snippet.strip()}\"")
 
         return "\n".join(parts)
 
-    def _legacy_generate_from_model(self, prompt, max_new_tokens=60, temperature=0.8, top_k_sampling=10):
-        if self.graph is None and not self._trained:
-            return "[Student LLM] No context set. Please provide a Knowledge Graph and teacher answer first."
+    def get_model_stats(self):
+        if not self.model:
+            return {
+                'total_params': 0,
+                'trainable_params': 0,
+                'vocab_size': 0,
+                'embed_dim': self.embed_dim,
+                'num_heads': self.num_heads,
+                'num_layers': self.num_layers,
+                'trained': False
+            }
+        total_params = sum(p.numel() for p in self.model.parameters())
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        return {
+            'total_params': total_params,
+            'trainable_params': trainable_params,
+            'vocab_size': self.tokenizer.vocab_size,
+            'embed_dim': self.embed_dim,
+            'num_heads': self.num_heads,
+            'num_layers': self.num_layers,
+            'ff_dim': self.ff_dim,
+            'final_loss': round(self.final_loss, 4),
+            'lm_loss': round(self.final_lm_loss, 4),
+            'structure_loss': round(self.final_structure_loss, 4),
+            'loss_history': self.loss_history,
+            'trained': self._trained
+        }
 
-        if not self._trained:
-            print("\n    ── Student LLM: First-time initialization ──")
-            corpus = self._build_training_corpus(prompt)
+    def get_attention_visualization(self, text):
+        if not self.model or not self._trained:
+            return {'tokens': [], 'attention_matrix': []}
 
-            if not corpus:
-                return "[Student LLM] No training data available."
+        tokens = self.tokenizer._tokenize_text(text)[:16]
+        if not tokens:
+            return {'tokens': [], 'attention_matrix': []}
 
-            print(f"\n    [TOKENIZATION] Building vocabulary from {len(corpus)} text segments...")
-            vocab_size = self.tokenizer.build_vocab(corpus)
-            print(f"    ✓ Vocabulary built: {vocab_size} tokens")
-            print(f"      Special tokens: PAD={self.tokenizer.pad_token_id}, "
-                  f"BOS={self.tokenizer.bos_token_id}, EOS={self.tokenizer.eos_token_id}")
-
-            sample_encoded = self.tokenizer.encode(corpus[0][:80], add_special_tokens=True)
-            print(f"    ✓ Sample encoding: '{corpus[0][:50]}...'")
-            print(f"      → Token IDs: {sample_encoded[:15]}{'...' if len(sample_encoded) > 15 else ''}")
-
-            print(f"\n    [EMBEDDING] Creating Token Embedding layer: {vocab_size} tokens × {self.embed_dim}d")
-            print(f"    [POSITIONAL] Sinusoidal Positional Encoding: max_len={self.max_seq_len}")
-
-            print(f"\n    [SELF-ATTENTION] Multi-Head Causal Self-Attention:")
-            print(f"      Heads: {self.num_heads}, Head dim: {self.embed_dim // self.num_heads}")
-            print(f"      Layers: {self.num_layers}, FFN dim: {self.ff_dim}")
-
-            self.model = StudentTransformerLM(
-                vocab_size=vocab_size,
-                embed_dim=self.embed_dim,
-                num_heads=self.num_heads,
-                num_layers=self.num_layers,
-                ff_dim=self.ff_dim,
-                max_seq_len=self.max_seq_len,
-            )
-
-            total_params = sum(p.numel() for p in self.model.parameters())
-            trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
-            print(f"\n    [MODEL] StudentTransformerLM initialized")
-            print(f"      Total parameters:     {total_params:,}")
-            print(f"      Trainable parameters: {trainable_params:,}")
-
-            print(f"\n    [TRAINING] Preparing training data...")
-            input_tensor, target_tensor = self._prepare_training_data(corpus)
-
-            if input_tensor is None:
-                return "[Student LLM] Failed to prepare training data."
-
-            print(f"      Input shape:  {list(input_tensor.shape)}")
-            print(f"      Target shape: {list(target_tensor.shape)}")
-
-            self._train_model(input_tensor, target_tensor)
-
-        print(f"\n    [GENERATION] Autoregressive decoding for: \"{prompt[:60]}...\"")
-
-        prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=True)
-        if len(prompt_ids) > self.max_seq_len - max_new_tokens:
-            prompt_ids = prompt_ids[:self.max_seq_len - max_new_tokens]
-
-        generated_ids = list(prompt_ids)
+        token_ids = [self.tokenizer.token2id.get(t, self.tokenizer.token2id[self.tokenizer.UNK_TOKEN]) for t in tokens]
+        input_t = torch.tensor([token_ids], dtype=torch.long)
 
         self.model.eval()
         with torch.no_grad():
-            for step in range(max_new_tokens):
-                input_tensor = torch.tensor([generated_ids[-self.max_seq_len:]], dtype=torch.long)
+            _, attn_weights = self.model(input_t, return_attention=True)
 
-                logits, attention_weights = self.model(input_tensor, return_attention=True)
+        last_layer_attn = attn_weights[-1][0].mean(dim=0).cpu().numpy().tolist()
 
-                next_token_logits = logits[0, -1, :] / temperature
+        return {
+            'tokens': tokens,
+            'attention_matrix': last_layer_attn
+        }
 
-                if top_k_sampling > 0:
-                    top_k_vals, top_k_idx = torch.topk(next_token_logits, min(top_k_sampling, self.tokenizer.vocab_size))
-                    filter_mask = torch.full_like(next_token_logits, float('-inf'))
-                    filter_mask.scatter_(0, top_k_idx, top_k_vals)
-                    next_token_logits = filter_mask
-
-                probs = F.softmax(next_token_logits, dim=-1)
-                next_token_id = torch.multinomial(probs, num_samples=1).item()
-
-                if next_token_id == self.tokenizer.eos_token_id:
-                    break
-
-                if next_token_id == self.tokenizer.pad_token_id:
-                    continue
-
-                generated_ids.append(next_token_id)
-
-        relevant_sentences = self._retrieve_teacher_sentences(prompt, top_k=6)
-
-        top_edges = self._query_graph(prompt)
-        kg_fact_lines = []
-        if top_edges:
-            for score, conf, u, v, data in top_edges[:5]:
-                rel_type = data.get('type', 'related to')
-                kg_fact_lines.append(f"  • {u} → {rel_type} → {v} (confidence: {conf:.2f})")
-
-        if relevant_sentences:
-            raw_answer = " ".join(relevant_sentences)
-            answer_text = self._clean_markdown(raw_answer)
-        elif self.teacher_answer:
-            clean = self._clean_markdown(self.teacher_answer)
-            answer_text = clean[:800].rsplit('.', 1)[0] + '.'
-        else:
-            answer_text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
-
-        parts = [f"[Student LLM]\n{answer_text}"]
-        if kg_fact_lines:
-            parts.append("\nKey facts from Knowledge Graph:\n" + "\n".join(kg_fact_lines))
-
-        return "\n".join(parts)

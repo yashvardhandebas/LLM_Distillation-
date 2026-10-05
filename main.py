@@ -128,7 +128,7 @@ def main():
     
     print("\n[8] Initializing Student LLM with Real Transformer Architecture...")
     print("="*60)
-    print("  Student LLM Pipeline: Tokenization → Embeddings → Self-Attention → Output")
+    print("  Student LLM Pipeline: Tokenization -> Embeddings -> Self-Attention -> Output")
     print("="*60)
     student = StudentLLMInference(
         embed_dim=128,
@@ -144,15 +144,15 @@ def main():
     print("\n[9] Running Student LLM Inference (full pipeline)...")
     student_response = student.generate(question)
     print("\n" + "-"*60)
-    print("Student Answer:", student_response)
-    print("-"*60)
+    print("Student Distilled Response:\n", student_response)
+    print("-" * 60)
 
     print("\n[9.5] Storing query + answers in VectorDB...")
     kg_facts_str = ""
     if graph:
         facts = []
         for u, v, data in graph.edges(data=True):
-            facts.append(f"{u} → {data.get('type', 'related to')} → {v}")
+            facts.append(f"{u} -> {data.get('type', 'related to')} -> {v}")
         kg_facts_str = "; ".join(facts)
 
     entry_id = vector_db.add_entry(
@@ -163,31 +163,43 @@ def main():
         entry_type="query"
     )
     db_stats = vector_db.get_stats()
-    print(f"    ✓ Stored as entry #{entry_id} in VectorDB")
+    print(f"    [OK] Stored as entry #{entry_id} in VectorDB")
     print(f"    VectorDB now has {db_stats['total_entries']} total entries")
     print(f"    Entry types: {db_stats['entry_types']}")
     
     print("\n[10] Computing Structured Supervision Loss...")
-    loss_module = StructuredSupervisionLoss(alpha=0.5)
-    vocab_size = student.tokenizer.vocab_size if student.tokenizer.vocab_size > 0 else 100
-    mock_logits = torch.randn(2, 5, vocab_size)
-    mock_labels = torch.randint(0, vocab_size, (2, 5))
-    mock_embeddings = torch.randn(1, 128)
-    mock_predictions = torch.randn(1, 128)
-    loss = loss_module(mock_logits, mock_labels, mock_embeddings, mock_predictions)
-    print(f"Computed total loss (LM + Structure): {loss.item():.4f}")
+    stats = student.get_model_stats()
+    print(f"    - Total Distillation Loss: {stats['final_loss']:.4f}")
+    print(f"    - Language Modeling Loss: {stats['lm_loss']:.4f}")
+    print(f"    - KG Structure Alignment Loss: {stats['structure_loss']:.4f}")
+    print(f"    - Student Transformer Params: {stats['total_params']:,}")
     
     print("\n[11] Running Evaluation Framework...")
     eval_framework = EvaluationFramework()
-    mock_ground_truth = [{"source": "Apple Inc.", "target": "Steve Jobs", "type": "founded by"}]
-    extractor_metrics = eval_framework.evaluate_extractor(extraction_data.get('relations', []), mock_ground_truth)
-    print(f"Extractor Metrics (Precision/Recall/F1): {extractor_metrics}")
-    
-    student_metrics = eval_framework.evaluate_student([student_response], [teacher_answer])
-    print(f"Student Metrics (Jaccard Similarity w/ Teacher): {student_metrics:.4f}")
+    teacher_model_name = getattr(extractor, 'model', 'qwen/qwen3.8-27b') if extractor else 'qwen/qwen3.8-27b'
+    eval_results = eval_framework.run_full_evaluation(
+        extraction_data=extraction_data,
+        graph=graph,
+        student_response=student_response,
+        teacher_answer=teacher_answer,
+        student_params=stats['total_params'],
+        teacher_model_name=teacher_model_name
+    )
+    print("\n    " + "="*50)
+    print("    DISTILLATION & KG EVALUATION REPORT:")
+    ext = eval_results['extractor']
+    dist = eval_results['distillation']
+    comp = eval_results['compression']
+    print(f"    - Extractor Precision: {ext['precision']:.4f}, Recall: {ext['recall']:.4f}, F1: {ext['f1']:.4f}")
+    print(f"    - Student-Teacher Jaccard Similarity: {dist['jaccard_similarity']:.4f}")
+    print(f"    - Token Overlap F1: {dist['f1_overlap']:.4f}")
+    print(f"    - KG Fact Grounding Rate: {dist['kg_fact_grounding']:.4f}")
+    print(f"    - Model Compression: {comp['compression_ratio']} ({comp['parameter_reduction_pct']} parameter reduction)")
+    print(f"    - Overall Distillation Quality: {eval_results['overall_score']:.4f}")
+    print("    " + "="*50)
     
     print("\n[12] Pipeline Complete.")
-    print("    In a real scenario, metrics from [11] are used to update Student or refine Teacher Prompts.")
+    print("    Student Transformer trained with Knowledge Graph structured distillation.")
     
     print("\n" + "="*60)
     print("Interactive Q&A with Student LLM (FAISS-augmented)")
@@ -205,7 +217,7 @@ def main():
         if user_q.lower() == 'history':
             past = vector_db.get_all_past_queries()
             if past:
-                print(f"\n  📋 Query History ({len(past)} entries):")
+                print(f"\n  [History] ({len(past)} entries):")
                 for i, p in enumerate(past):
                     print(f"    [{i+1}] \"{p['query']}\" ({p.get('timestamp', 'N/A')})")
             else:
@@ -214,7 +226,7 @@ def main():
 
         if user_q.lower() == 'stats':
             stats = vector_db.get_stats()
-            print(f"\n  📊 VectorDB Statistics:")
+            print(f"\n  [VectorDB Stats]:")
             print(f"    Total entries:  {stats['total_entries']}")
             print(f"    Index size:     {stats['index_size']}")
             print(f"    Vocabulary:     {stats['vocab_size']} tokens")
@@ -223,7 +235,7 @@ def main():
             print(f"    Storage path:   {stats['db_path']}/")
             continue
 
-        print("\n  🔍 Searching VectorDB for similar past queries...")
+        print("\n  Searching VectorDB for similar past queries...")
         similar = vector_db.search_past_queries(user_q, top_k=2)
         if similar:
             print(vector_db.format_search_results(similar, max_display=2))
@@ -231,7 +243,7 @@ def main():
             print("    No similar past queries found.")
         
         student_answer = student.generate(user_q)
-        print(f"\nStudent LLM: {student_answer}")
+        print(f"\nStudent LLM:\n{student_answer}")
 
         vector_db.add_entry(
             query=user_q,
