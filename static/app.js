@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// AccuLLM — Frontend Application Logic
+// AccuLLM — Frontend Application Logic (Complete)
 // ═══════════════════════════════════════════════════════════════
 
 const API = '';
@@ -192,7 +192,7 @@ function renderResults(data) {
         document.getElementById('similarCard').style.display = 'none';
     }
 
-    // Model info
+    // Model info / architecture specs
     if (data.model_info && data.model_info.total_params) {
         document.getElementById('modelCard').style.display = 'block';
         const info = data.model_info;
@@ -202,24 +202,147 @@ function renderResults(data) {
             <div class="model-tag"><span class="model-tag-label">Embed</span><span class="model-tag-value">${info.embed_dim}d</span></div>
             <div class="model-tag"><span class="model-tag-label">Heads</span><span class="model-tag-value">${info.num_heads}</span></div>
             <div class="model-tag"><span class="model-tag-label">Layers</span><span class="model-tag-value">${info.num_layers}</span></div>
+            <div class="model-tag"><span class="model-tag-label">FF Dim</span><span class="model-tag-value">${info.ff_dim}</span></div>
             <div class="model-tag"><span class="model-tag-label">Type</span><span class="model-tag-value">GPT-style Decoder</span></div>
         `;
     }
 
-    // Metrics
+    // Structured Supervision Loss breakdown
+    if (data.model_info && data.model_info.final_loss !== undefined) {
+        document.getElementById('lossCard').style.display = 'block';
+        const info = data.model_info;
+        document.getElementById('lossBreakdown').innerHTML = `
+            <div class="loss-item">
+                <div class="loss-item-label">Total Distillation Loss</div>
+                <div class="loss-item-val">${(info.final_loss || 0).toFixed(4)}</div>
+            </div>
+            <div class="loss-item">
+                <div class="loss-item-label">Language Modeling Loss (L_LM)</div>
+                <div class="loss-item-val" style="color: var(--info)">${(info.lm_loss || 0).toFixed(4)}</div>
+            </div>
+            <div class="loss-item">
+                <div class="loss-item-label">KG Structure Alignment Loss (L_Struct)</div>
+                <div class="loss-item-val" style="color: var(--success)">${(info.structure_loss || 0).toFixed(4)}</div>
+            </div>
+        `;
+
+        // Loss history table
+        if (info.loss_history && info.loss_history.length > 0) {
+            const rows = info.loss_history.map(r => `
+                <tr>
+                    <td>${r.epoch}</td>
+                    <td>${r.total_loss}</td>
+                    <td>${r.lm_loss}</td>
+                    <td>${r.structure_loss}</td>
+                </tr>
+            `).join('');
+            document.getElementById('lossHistory').innerHTML = `
+                <table class="loss-table">
+                    <thead>
+                        <tr>
+                            <th>Epoch</th>
+                            <th>Total Loss</th>
+                            <th>LM Loss</th>
+                            <th>Structure Loss</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            `;
+        }
+    }
+
+    // Evaluation Metrics
     if (data.metrics) {
         document.getElementById('metricsCard').style.display = 'block';
         const m = data.metrics;
         const ext = m.extractor || {};
-        document.getElementById('metricsRow').innerHTML = `
-            <div class="metric-chip"><span class="metric-label">Precision</span><span class="metric-value">${(ext.precision || 0).toFixed(3)}</span></div>
-            <div class="metric-chip"><span class="metric-label">Recall</span><span class="metric-value">${(ext.recall || 0).toFixed(3)}</span></div>
-            <div class="metric-chip"><span class="metric-label">F1</span><span class="metric-value">${(ext.f1 || 0).toFixed(3)}</span></div>
-            <div class="metric-chip"><span class="metric-label">Student Similarity</span><span class="metric-value">${(m.student_similarity || 0).toFixed(4)}</span></div>
+        const dist = m.distillation || {};
+        const comp = m.compression || {};
+
+        // Overall score badge
+        const score = m.overall_score || 0;
+        const overallBadge = document.getElementById('overallBadge');
+        if (overallBadge) overallBadge.textContent = `Score: ${score.toFixed(3)}`;
+
+        // Extractor metrics
+        document.getElementById('extractorMetrics').innerHTML = `
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Precision</span>
+                <span class="metric-stat-val accent">${(ext.precision || 0).toFixed(4)}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Recall</span>
+                <span class="metric-stat-val accent">${(ext.recall || 0).toFixed(4)}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">F1 Score</span>
+                <span class="metric-stat-val highlight">${(ext.f1 || 0).toFixed(4)}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Avg Confidence</span>
+                <span class="metric-stat-val">${(ext.avg_confidence || 0).toFixed(4)}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Relations Extracted</span>
+                <span class="metric-stat-val">${ext.total_extracted || 0}</span>
+            </div>
+        `;
+
+        // Distillation metrics
+        document.getElementById('distillationMetrics').innerHTML = `
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Jaccard Similarity</span>
+                <span class="metric-stat-val accent">${(dist.jaccard_similarity || 0).toFixed(4)}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Token Overlap F1</span>
+                <span class="metric-stat-val accent">${(dist.f1_overlap || 0).toFixed(4)}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">ROUGE-L Approx</span>
+                <span class="metric-stat-val accent">${(dist.rouge_l_approx || 0).toFixed(4)}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">KG Fact Grounding</span>
+                <span class="metric-stat-val highlight">${(dist.kg_fact_grounding || 0).toFixed(4)}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Token Precision</span>
+                <span class="metric-stat-val">${(dist.token_precision || 0).toFixed(4)}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Token Recall</span>
+                <span class="metric-stat-val">${(dist.token_recall || 0).toFixed(4)}</span>
+            </div>
+        `;
+
+        // Compression metrics
+        document.getElementById('compressionMetrics').innerHTML = `
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Compression Ratio</span>
+                <span class="metric-stat-val highlight">${comp.compression_ratio || '—'}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Parameter Reduction</span>
+                <span class="metric-stat-val highlight">${comp.parameter_reduction_pct || '—'}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Teacher Params</span>
+                <span class="metric-stat-val">${(comp.teacher_params || 0).toLocaleString()}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Student Params</span>
+                <span class="metric-stat-val">${(comp.student_params || 0).toLocaleString()}</span>
+            </div>
+            <div class="metric-stat-row">
+                <span class="metric-stat-name">Overall Score</span>
+                <span class="metric-stat-val highlight">${(m.overall_score || 0).toFixed(4)}</span>
+            </div>
         `;
     }
 
-    // Graph
+    // Knowledge Graph
     if (data.graph_data) {
         renderGraph(data.graph_data);
     }
@@ -243,6 +366,8 @@ function renderGraph(graphData) {
         'Concept': '#74b9ff',
         'Product': '#a29bfe',
         'Technology': '#fd79a8',
+        'Country': '#e17055',
+        'Institution': '#55efc4',
         'Unknown': '#636e72',
     };
 
@@ -305,6 +430,90 @@ function renderGraph(graphData) {
     };
 
     graphNetwork = new vis.Network(container, { nodes, edges }, options);
+
+    // Render legend
+    const legendEl = document.getElementById('graphLegend');
+    if (legendEl) {
+        const presentTypes = [...new Set(graphData.nodes.map(n => n.type))];
+        legendEl.innerHTML = presentTypes.map(type => `
+            <span class="legend-item">
+                <span class="legend-dot" style="background:${nodeColors[type] || nodeColors['Unknown']}"></span>
+                ${type}
+            </span>
+        `).join('');
+    }
+}
+
+// ════════════════ ATTENTION VISUALIZATION ════════════════
+async function inspectAttention() {
+    const input = document.getElementById('attnInput');
+    const text = (input.value || '').trim();
+    const wrapper = document.getElementById('attnHeatmap');
+
+    if (!text) {
+        showToast('Please enter a phrase to inspect.', 'error');
+        return;
+    }
+
+    wrapper.innerHTML = '<div class="attn-empty">Loading attention weights...</div>';
+
+    try {
+        const res = await fetch(`${API}/api/attention`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+
+        const data = await res.json();
+
+        if (data.error) {
+            wrapper.innerHTML = `<div class="attn-empty">${escapeHtml(data.error)}</div>`;
+            return;
+        }
+
+        if (!data.tokens || data.tokens.length === 0) {
+            wrapper.innerHTML = '<div class="attn-empty">No tokens found. Try a different phrase.</div>';
+            return;
+        }
+
+        renderAttentionHeatmap(data.tokens, data.attention_matrix, wrapper);
+    } catch (err) {
+        wrapper.innerHTML = `<div class="attn-empty">Error: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+function renderAttentionHeatmap(tokens, matrix, wrapper) {
+    // Build header row
+    const headerCells = tokens.map(t => `<th title="${escapeHtml(t)}">${escapeHtml(t.substring(0, 6))}</th>`).join('');
+
+    // Build data rows with color-coded cells
+    const rows = matrix.map((row, i) => {
+        const cells = row.map((val, j) => {
+            const intensity = Math.min(1, Math.max(0, val));
+            const alpha = 0.1 + intensity * 0.8;
+            const textColor = intensity > 0.5 ? '#fff' : '#8888a0';
+            return `<td>
+                <div class="attn-cell" title="${tokens[i]}→${tokens[j]}: ${val.toFixed(3)}"
+                     style="background:rgba(108,92,231,${alpha.toFixed(2)});color:${textColor};padding:4px;border-radius:3px;">
+                    ${val.toFixed(2)}
+                </div>
+            </td>`;
+        }).join('');
+        return `<tr><th>${escapeHtml(tokens[i].substring(0, 6))}</th>${cells}</tr>`;
+    }).join('');
+
+    wrapper.innerHTML = `
+        <div>
+            <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">
+                Multi-Head Self-Attention weights (averaged across heads, last layer). 
+                Darker = stronger attention.
+            </p>
+            <table class="attn-matrix">
+                <thead><tr><th></th>${headerCells}</tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    `;
 }
 
 // ════════════════ CHAT ════════════════
@@ -354,12 +563,15 @@ function addChatMessage(text, role) {
 }
 
 // ════════════════ TABS ════════════════
-function switchTab(tabName) {
+function switchTab(tabName, event) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
 
-    event.target.classList.add('active');
-    document.getElementById(`tab-${tabName}`).classList.add('active');
+    if (event && event.target) {
+        event.target.classList.add('active');
+    }
+    const tabEl = document.getElementById(`tab-${tabName}`);
+    if (tabEl) tabEl.classList.add('active');
 
     if (tabName === 'graph' && graphNetwork) {
         setTimeout(() => graphNetwork.fit(), 100);

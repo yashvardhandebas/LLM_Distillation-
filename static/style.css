@@ -992,3 +992,213 @@ body {
     animation: none;
     transition: width 0.3s ease;
 }
+
+/* ════════════════ METRICS & EVALUATION ENHANCEMENTS ════════════════ */
+.overall-badge {
+    margin-left: auto;
+    background: var(--gradient-primary);
+    color: #fff;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 4px 14px;
+    border-radius: 20px;
+    box-shadow: 0 2px 10px var(--accent-glow);
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+}
+
+.metric-box {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.metric-box-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--accent-secondary);
+}
+
+.metric-box-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.metric-stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.metric-stat-row:last-child {
+    border-bottom: none;
+}
+
+.metric-stat-name {
+    color: var(--text-secondary);
+}
+
+.metric-stat-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.metric-stat-val.highlight {
+    color: var(--success);
+}
+
+.metric-stat-val.accent {
+    color: var(--accent-secondary);
+}
+
+/* ════════════════ LOSS & ATTENTION STYLES ════════════════ */
+.loss-breakdown-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.loss-item {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    text-align: center;
+}
+
+.loss-item-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.loss-item-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--warning);
+}
+
+.loss-history-container {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    overflow-x: auto;
+}
+
+.loss-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.loss-table th, .loss-table td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.loss-table th {
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.loss-table td {
+    color: var(--text-secondary);
+}
+
+/* Attention Heatmap */
+.attention-input-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.attention-heatmap-wrapper {
+    overflow-x: auto;
+    padding: 16px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.attn-empty {
+    color: var(--text-dim);
+    font-size: 14px;
+}
+
+.attn-matrix {
+    border-collapse: collapse;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+}
+
+.attn-matrix th, .attn-matrix td {
+    width: 44px;
+    height: 36px;
+    text-align: center;
+    vertical-align: middle;
+    border: 1px solid rgba(255,255,255,0.06);
+    padding: 2px 4px;
+}
+
+.attn-matrix th {
+    color: var(--accent-secondary);
+    font-weight: 600;
+}
+
+.attn-cell {
+    font-weight: 600;
+    border-radius: 4px;
+    transition: transform 0.15s ease;
+}
+
+.attn-cell:hover {
+    transform: scale(1.15);
+    z-index: 10;
+    box-shadow: 0 0 10px rgba(108,92,231,0.5);
+}
+
+.graph-legend {
+    margin-left: auto;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 11px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-secondary);
+}
+
+.legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
